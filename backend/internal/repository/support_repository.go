@@ -26,6 +26,7 @@ type Store struct {
 	Parcels       *LandParcelRepository
 	Observations  *SurveyObservationRepository
 	Proposals     *BoundaryProposalRepository
+	Inquiries     *EvidenceInquiryRepository
 	Conflicts     *TopologyConflictRepository
 	DetectionRuns *TopologyDetectionRunRepository
 }
@@ -58,6 +59,7 @@ func NewStore(db *gorm.DB) *Store {
 		Parcels:       &LandParcelRepository{db},
 		Observations:  &SurveyObservationRepository{db},
 		Proposals:     &BoundaryProposalRepository{db},
+		Inquiries:     &EvidenceInquiryRepository{db},
 		Conflicts:     &TopologyConflictRepository{db},
 		DetectionRuns: &TopologyDetectionRunRepository{db},
 	}
@@ -79,8 +81,11 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 func MigrateAndSeed(db *gorm.DB) error {
-	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.EvidenceInquiry{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
+	}
+	if err := EnsureEvidenceInquiryIndexes(db); err != nil {
+		return err
 	}
 	// Existing installations may have been created before the cadastral RBAC roles
 	// were introduced. Expand the PostgreSQL check constraint idempotently.
@@ -145,6 +150,21 @@ func (r *UserRepository) FindByID(id uint) (model.User, error) {
 		return user, fmt.Errorf("find user by id: %w", err)
 	}
 	return user, nil
+}
+
+func (r *UserRepository) FindByIDs(ids []uint) (map[uint]model.User, error) {
+	usersByID := make(map[uint]model.User)
+	if len(ids) == 0 {
+		return usersByID, nil
+	}
+	var users []model.User
+	if err := r.db.Where("id IN ?", ids).Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("find users by ids: %w", err)
+	}
+	for _, user := range users {
+		usersByID[user.ID] = user
+	}
+	return usersByID, nil
 }
 
 type AuditRepository struct{ db *gorm.DB }

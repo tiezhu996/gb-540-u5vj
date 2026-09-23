@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -89,6 +90,22 @@ func (s *CadastralService) TransitionProposal(id uint, req dto.ProposalTransitio
 	}
 	if err := authorizeProposalTransition(item, to, actor); err != nil {
 		return item, err
+	}
+	if to == constants.ProposalAccepted {
+		pendingCount, pendingErr := s.store.Inquiries.CountPendingByProposal(id)
+		if pendingErr != nil {
+			return item, internal("check evidence inquiries failed", pendingErr)
+		}
+		if pendingCount > 0 {
+			pending, found, findErr := s.store.Inquiries.FindPendingByProposal(id)
+			if findErr != nil {
+				return item, internal("load pending evidence inquiry failed", findErr)
+			}
+			if !found {
+				return item, conflict("an evidence inquiry is still awaiting a response", nil)
+			}
+			return item, conflict(fmt.Sprintf("%s is still awaiting a response", InquiryNumber(pending.ID)), nil)
+		}
 	}
 	updates := map[string]any{}
 	if req.Rationale != "" {

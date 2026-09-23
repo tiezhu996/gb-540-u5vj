@@ -24,8 +24,11 @@ func newCadastralTestService(t *testing.T) (*CadastralService, *repository.Store
 	if err != nil {
 		t.Fatalf("open SQLite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.EvidenceInquiry{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
 		t.Fatalf("migrate SQLite: %v", err)
+	}
+	if err := repository.EnsureEvidenceInquiryIndexes(db); err != nil {
+		t.Fatalf("create evidence inquiry indexes: %v", err)
 	}
 	store := repository.NewStore(db)
 	return NewCadastralService(store), store
