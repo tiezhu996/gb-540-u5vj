@@ -90,6 +90,15 @@ func (s *CadastralService) TransitionProposal(id uint, req dto.ProposalTransitio
 	if err := authorizeProposalTransition(item, to, actor); err != nil {
 		return item, err
 	}
+	if to == constants.ProposalAccepted {
+		pendingCodes, pendingErr := s.pendingChallengeCodes(id)
+		if pendingErr != nil {
+			return item, pendingErr
+		}
+		if len(pendingCodes) > 0 {
+			return item, conflict("proposal cannot be accepted while evidence challenges remain unanswered: "+strings.Join(pendingCodes, ", "), nil)
+		}
+	}
 	updates := map[string]any{}
 	if req.Rationale != "" {
 		updates["rationale"] = req.Rationale

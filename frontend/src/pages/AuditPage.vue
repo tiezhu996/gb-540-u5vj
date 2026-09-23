@@ -14,6 +14,7 @@ const entityOptions = [
   { value: 'LandParcel', label: '地块' },
   { value: 'SurveyObservation', label: '测量观测' },
   { value: 'BoundaryProposal', label: '边界提案' },
+  { value: 'EvidenceChallenge', label: '证据质询' },
   { value: 'TopologyConflict', label: '拓扑冲突' },
 ]
 

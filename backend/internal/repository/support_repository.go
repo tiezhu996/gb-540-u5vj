@@ -26,6 +26,7 @@ type Store struct {
 	Parcels       *LandParcelRepository
 	Observations  *SurveyObservationRepository
 	Proposals     *BoundaryProposalRepository
+	Challenges    *EvidenceChallengeRepository
 	Conflicts     *TopologyConflictRepository
 	DetectionRuns *TopologyDetectionRunRepository
 }
@@ -58,6 +59,7 @@ func NewStore(db *gorm.DB) *Store {
 		Parcels:       &LandParcelRepository{db},
 		Observations:  &SurveyObservationRepository{db},
 		Proposals:     &BoundaryProposalRepository{db},
+		Challenges:    &EvidenceChallengeRepository{db},
 		Conflicts:     &TopologyConflictRepository{db},
 		DetectionRuns: &TopologyDetectionRunRepository{db},
 	}
@@ -79,7 +81,7 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 func MigrateAndSeed(db *gorm.DB) error {
-	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.LandParcel{}, &model.SurveyObservation{}, &model.BoundaryProposal{}, &model.EvidenceChallenge{}, &model.TopologyConflict{}, &model.TopologyDetectionRun{}); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
 	// Existing installations may have been created before the cadastral RBAC roles

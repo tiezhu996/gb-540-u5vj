@@ -28,6 +28,7 @@ func Register(engine *gin.Engine, deps Dependencies) {
 	registerLandParcelRoutes(protected, deps)
 	registerSurveyObservationRoutes(protected, deps)
 	registerBoundaryProposalRoutes(protected, deps)
+	registerEvidenceChallengeRoutes(protected, deps)
 	registerTopologyConflictRoutes(protected, deps)
 	audit := protected.Group("/audit")
 	audit.GET("", appmw.RBACMiddleware(constants.RoleAuditor, constants.RoleReviewer, constants.RoleAdmin), deps.AuditHandler.List)

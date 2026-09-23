@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ChevronDown, Plus, RefreshCw } from 'lucide-vue-next'
+import { ChevronDown, Plus, RefreshCw, MessagesSquare } from 'lucide-vue-next'
 import PageHeader from '@/components/common/PageHeader.vue'
 import ProposalStateBadge from '@/components/common/ProposalStateBadge.vue'
 import GeometryEvidenceDrawer from '@/components/common/GeometryEvidenceDrawer.vue'
+import EvidenceChallengePanel from '@/components/common/EvidenceChallengePanel.vue'
 import TopologyLegend from '@/components/common/TopologyLegend.vue'
 import { useBoundaryProposalStore } from '@/stores/boundary-proposal'
 import { useLandParcelStore } from '@/stores/land-parcel'
 import { useSurveyObservationStore } from '@/stores/survey-observation'
+import { useEvidenceChallengeStore } from '@/stores/evidence-challenge'
 import { useAuth } from '@/hooks/useAuth'
 import { proposalStateLabel, type ProposalState } from '@/types/enums/proposal-state'
 import type { BoundaryProposal } from '@/types/boundary-proposal'
@@ -15,9 +17,11 @@ import type { BoundaryProposal } from '@/types/boundary-proposal'
 const proposals = useBoundaryProposalStore()
 const parcels = useLandParcelStore()
 const observations = useSurveyObservationStore()
+const challenges = useEvidenceChallengeStore()
 const auth = useAuth()
 const createOpen = ref(false)
 const evidenceOpen = ref(false)
+const challengeOpen = ref(false)
 const selected = ref<BoundaryProposal | null>(null)
 const form = reactive({
   parcel_id: 0,
@@ -41,6 +45,7 @@ async function load() {
     parcels.fetch({ page_size: 100 }),
     observations.fetch({ page_size: 100 }),
     proposals.fetch({ page_size: 100 }),
+    challenges.fetchPending(),
   ])
 }
 
@@ -58,6 +63,9 @@ function selectParcel(parcelID: number) {
 function canTransition(item: BoundaryProposal, to: ProposalState) {
   const actorID = auth.user.value?.id
   if (!actorID) return false
+  // Acceptance stays closed while cited evidence questions are unanswered;
+  // rejection and revision remain available to the reviewer.
+  if (to === 'accepted' && challenges.pendingForProposal(item.id).length) return false
   const creatorStep = to === 'validated' || to === 'submitted' || (to === 'draft' && item.proposal_state === 'revision')
   if (creatorStep) {
     return auth.hasRole('admin') || (auth.hasRole('surveyor', 'gis_analyst') && item.created_by === actorID)
@@ -65,8 +73,12 @@ function canTransition(item: BoundaryProposal, to: ProposalState) {
   return auth.hasRole('admin') || (auth.hasRole('reviewer') && item.created_by !== actorID)
 }
 
-function availableTransitions(item: BoundaryProposal) {
-  return (transitionTargets[item.proposal_state] ?? []).filter((state) => canTransition(item, state))
+function transitionDisabledReason(item: BoundaryProposal, to: ProposalState) {
+  if (to === 'accepted') {
+    const open = challenges.pendingForProposal(item.id)
+    if (open.length) return `接受入口关闭：待回应质询 ${open.map((entry) => entry.challenge_code).join('、')}`
+  }
+  return ''
 }
 
 function observationCount(item: BoundaryProposal) {
@@ -81,11 +93,25 @@ function observationCount(item: BoundaryProposal) {
 
 async function advance(item: BoundaryProposal, to: ProposalState) {
   await proposals.transition(item.id, { to, version: item.version })
+  if (to === 'accepted') await challenges.fetchPending()
+}
+
+function pendingChallengeCodes(item: BoundaryProposal) {
+  return challenges.pendingForProposal(item.id).map((entry) => entry.challenge_code)
+}
+
+function transitionsFor(item: BoundaryProposal): ProposalState[] {
+  return transitionTargets[item.proposal_state] ?? []
 }
 
 function showEvidence(item: BoundaryProposal) {
   selected.value = item
   evidenceOpen.value = true
+}
+
+function showChallenges(item: BoundaryProposal) {
+  selected.value = item
+  challengeOpen.value = true
 }
 
 onMounted(load)
@@ -102,16 +128,36 @@ onMounted(load)
       <el-table v-loading="proposals.loading" :data="proposals.items" row-key="id">
         <el-table-column label="提案" width="90"><template #default="scope"><strong>#{{ scope.row.id }}</strong><small class="muted">v{{ scope.row.version }}</small></template></el-table-column>
         <el-table-column label="地块" width="130"><template #default="scope">#{{ scope.row.parcel_id }} · 基线 v{{ scope.row.base_version }}</template></el-table-column>
-        <el-table-column label="证据" width="90"><template #default="scope">{{ observationCount(scope.row) }} 条</template></el-table-column>
+        <el-table-column label="证据" width="150">
+          <template #default="scope">
+            <span>{{ observationCount(scope.row) }} 条观测</span>
+            <el-button v-if="challenges.forProposal(scope.row.id).length" link type="warning" size="small" @click="showChallenges(scope.row)">
+              {{ challenges.pendingForProposal(scope.row.id).length }} 待回应 / {{ challenges.forProposal(scope.row.id).length }} 质询
+            </el-button>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="120"><template #default="scope"><ProposalStateBadge :state="scope.row.proposal_state" /></template></el-table-column>
         <el-table-column label="面积变化" width="125"><template #default="scope"><span :class="scope.row.area_delta_square_m >= 0 ? 'positive' : 'negative'">{{ scope.row.area_delta_square_m >= 0 ? '+' : '' }}{{ scope.row.area_delta_square_m.toFixed(2) }} m²</span></template></el-table-column>
         <el-table-column prop="rationale" label="理由" min-width="200" show-overflow-tooltip />
-        <el-table-column label="动作" width="190">
+        <el-table-column label="动作" width="250">
           <template #default="scope">
             <el-button text @click="showEvidence(scope.row)">几何</el-button>
-            <el-dropdown v-if="availableTransitions(scope.row).length" trigger="click" @command="advance(scope.row, $event)">
+            <el-tooltip v-if="scope.row.proposal_state === 'submitted' || scope.row.proposal_state === 'reviewed'" placement="top" :disabled="!pendingChallengeCodes(scope.row).length" :content="`接受入口关闭：待回应质询 ${pendingChallengeCodes(scope.row).join('、')}`">
+              <span><el-button text :type="pendingChallengeCodes(scope.row).length ? 'warning' : 'primary'" @click="showChallenges(scope.row)"><MessagesSquare :size="14" />质询<span v-if="pendingChallengeCodes(scope.row).length" class="challenge-count">{{ pendingChallengeCodes(scope.row).length }}</span></el-button></span>
+            </el-tooltip>
+            <el-button v-else-if="challenges.forProposal(scope.row.id).length" text type="primary" @click="showChallenges(scope.row)"><MessagesSquare :size="14" />质询</el-button>
+            <el-dropdown v-if="transitionsFor(scope.row).length" trigger="click" @command="advance(scope.row, $event)">
               <el-button text type="primary">流转<ChevronDown :size="14" /></el-button>
-              <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="target in availableTransitions(scope.row)" :key="target" :command="target">{{ proposalStateLabel[target] }}</el-dropdown-item></el-dropdown-menu></template>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="target in transitionsFor(scope.row)"
+                    :key="target"
+                    :command="target"
+                    :disabled="!canTransition(scope.row, target)"
+                  >{{ proposalStateLabel[target] }}<span v-if="!canTransition(scope.row, target) && transitionDisabledReason(scope.row, target)" class="dropdown-hint">（{{ transitionDisabledReason(scope.row, target).replace('接受入口关闭：', '') }}）</span></el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
             </el-dropdown>
           </template>
         </el-table-column>
@@ -135,11 +181,15 @@ onMounted(load)
   </el-dialog>
 
   <GeometryEvidenceDrawer v-model="evidenceOpen" title="提案几何" :geometry="selected?.proposed_geojson" :explanation="selected ? `提案 #${selected.id} · 吸附容差 ${selected.snap_tolerance_m} m` : ''" />
+
+  <EvidenceChallengePanel v-model="challengeOpen" :proposal="selected" @changed="challenges.fetchPending()" />
 </template>
 
 <style scoped>
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .muted { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
+.challenge-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; margin-left: 4px; padding: 0 4px; border-radius: 9px; background: #a66d0b; color: #fff; font-size: 10px; font-weight: 800; }
+.dropdown-hint { margin-left: 6px; color: #a66d0b; font-size: 11px; font-weight: 700; }
 .positive { color: #17604e; }.negative { color: #9c3028; }
 @media (max-width: 620px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

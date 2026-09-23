@@ -76,6 +76,9 @@ All endpoints below except login and health checks require `Authorization: Beare
 | `POST` | `/observations/:id/transition` | Accept, reject, or supersede an observation |
 | `GET`, `POST` | `/proposals` | List or create proposals |
 | `POST` | `/proposals/:id/transition` | Move proposal through allowed states |
+| `GET`, `POST` | `/proposals/:id/challenges` | List evidence challenges for a proposal, or raise one (reviewer; requires an `Idempotency-Key` header) |
+| `GET` | `/evidence-challenges` | List challenges across proposals, e.g. `?state=pending` |
+| `POST` | `/evidence-challenges/:id/respond` | Author or administrator supplements the challenged evidence |
 | `GET` | `/conflicts` | List detected topology conflicts |
 | `POST` | `/conflicts/detect` | Run detection; requires an `Idempotency-Key` header |
 | `POST` | `/conflicts/:id/transition` | Confirm, mark false positive, propose resolution, or close a conflict |
@@ -98,9 +101,17 @@ The frontend sends every request through `/api/v1`. `parcel_ids` is persisted by
 - Backend: `backend/internal/constants/proposal_state.go`, proposal DTO input, model, `service/boundary_proposal_service.go`, repository, handler, router, and `service/cadastral_service_test.go`.
 - Frontend: `frontend/src/types/enums/proposal-state.ts`, entity type, API, Pinia store, `ProposalStateBadge.vue`, and `ProposalsPage.vue`.
 
+`ChallengeState = pending | answered`
+
+- A reviewer can raise an **evidence challenge** against specific observations of a submitted or reviewed proposal (`POST /proposals/:id/challenges` with an `Idempotency-Key`); replays of the same actor/key return the stored record, so a repeated click never creates a second pending challenge.
+- The proposal author (or an administrator) answers via `POST /evidence-challenges/:id/respond`; a challenge can only be answered once and the original question plus cited observations stay archived.
+- Acceptance is blocked while any challenge is `pending`: the transition returns `409` naming the open challenge codes (e.g. `EC-3-1`), and the proposals page disables the accept entry with those codes. Rejection and request-for-revision remain available.
+- Backend: `backend/internal/constants/challenge_state.go`, `model/evidence_challenge.go`, `dto/evidence_challenge.go`, `repository/evidence_challenge_repository.go`, `service/evidence_challenge_service.go`, `handler/evidence_challenge_handler.go`, `router/evidence_challenge_router.go`, and `service/evidence_challenge_service_test.go`.
+- Frontend: `frontend/src/types/enums/challenge-state.ts`, `types/evidence-challenge.ts`, `api/evidence-challenge.ts`, `stores/evidence-challenge.ts`, `components/common/EvidenceChallengePanel.vue`, and `ProposalsPage.vue`.
+
 The independent Gin middleware files are `request_id.go`, `recovery.go`, `auth.go`, `rbac.go`, `audit.go`, and `error_handler.go`. They establish request correlation and audit context before authentication, enforce authorization and rate limits, recover panics, and retain a uniform JSON fallback for recorded Gin errors.
 
-Allowed proposal flow is `draft -> validated -> submitted -> reviewed -> accepted/rejected`, with `reviewed -> revision -> draft`. Illegal transitions return `409`; an author cannot review their own proposal. Conflict flow is `detected -> confirmed -> resolution_proposed -> resolved -> closed`, with the alternate `detected -> false_positive -> closed` path. Applying a reviewed suggestion creates a new draft proposal version and resolves the source conflict; it does not rewrite the original proposal or parcel boundary.
+Allowed proposal flow is `draft -> validated -> submitted -> reviewed -> accepted/rejected`, with `reviewed -> revision -> draft`. Illegal transitions return `409`; an author cannot review their own proposal. While a proposal is at the review desk, a reviewer may question the cited survey observations through an evidence challenge; the author must answer every pending challenge before the proposal can be accepted, and the full question/answer exchange is retained. Conflict flow is `detected -> confirmed -> resolution_proposed -> resolved -> closed`, with the alternate `detected -> false_positive -> closed` path. Applying a reviewed suggestion creates a new draft proposal version and resolves the source conflict; it does not rewrite the original proposal or parcel boundary.
 
 ## Coordinates And Legal Boundary
 
